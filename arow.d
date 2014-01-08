@@ -1,3 +1,7 @@
+/**
+ * Authors: Kazuya Gokita (@kazoo04)
+ */
+
 import std.stdio;
 import std.math;
 import std.file;
@@ -6,46 +10,41 @@ import std.string;
 import std.conv;
 import std.random;
 
-/***
- * ひとつの特徴を表す構造体
- */
+
 struct feature {
-  uint index;      ///特徴量のインデクス ( > 0 )
-  double weight;  ///特徴量の値
+  uint index;
+  double weight;
 }
 
-/***
- * ひとつの学習データを表す構造体
- *
- * ひとつの学習データは、１つ以上の特徴と、教師データ(-1, +1)で構成されます
- */
 class example {
-  int label;      ///教師信号(-1, +1)
-  feature[] fv;    ///特徴ベクトル
+  int label;    //(-1, +1)
+  feature[] fv;
 }
 
 /***
- * Adaptive Regularization of Weight Vectors の実装
+ * Adaptive Regularization of Weight Vectors
  *
  * See_Also:
  *   K. Crammer, A. Kulesza, and M. Dredze. "Adaptive regularization of weight vectors" NIPS 2009
  */
 class Arow {
   private:
-    size_t size;      /// 特徴の次元数N
-    double[] mean;    /// 平均ベクトルμ
-    double[] cov;     ///  分散行列∑ (リソース節約のために対角行列で近似)
-    const double hyperparameter = 0.1; ///ハイパーパラメータr (r > 0)
+    size_t size;      /// Dimention
+    double[] mean;    /// Average vector: μ
+    double[] cov;     /// Variance Matrix: ∑ (diagonal matrix)
+    immutable double hyperparameter = 0.1; ///Hyper parameter: r (r > 0)
 
     invariant()
     {
+      assert(size > 0);
+      assert(mean != null);
+      assert(cov != null);
+      assert(mean.length == size);
+      assert(cov.length == size);
+      assert(hyperparameter > 0);
     }
 
   public:
-
-    /**
-     * コンストラクタ
-     */
     this(size_t num_feature) {
       size = num_feature;
       mean = new double[size];
@@ -59,9 +58,10 @@ class Arow {
 
 
     /**
-     * 認識識別面と特徴ベクトルfvの距離(マージン)を返す
-     *
-     * Returns: 識別超平面と特徴ベクトルfvのユークリッド距離
+     * Calculate the distance between a vector and the hyperplane
+     * Params:
+     *  fv =  feature
+     * Returns: Margin(Euclidean distance)
      */
     double GetMargin(feature[] fv)
       in
@@ -77,37 +77,21 @@ class Arow {
         // margin = x_t^T μ_t
         double margin = 0.0;
 
-        /*
-         * 内積を計算する
-         * 識別するだけなら分散は考慮する必要がない
-         */
+        // inner product
         foreach(v; fv) {
           margin += mean[v.index] * v.weight;
         }
 
         return margin;
       }
-    
-    int CountZero()
-    {
-      int count;
-
-      foreach(m; mean) {
-        if(m == 0) {
-          count++;
-        }
-      }
-
-      writefln("zero = %f", count / cast(double)mean.length);
-
-      return count;
-    }
 
 
     /**
-     * confidence(確信度)を計算して返す
+     * Calculate confidence
+     * Params:
+     *  fv =  feature
      *
-     * Returns: 確信度
+     * Returns: confidence
      */ 
     double GetConfidence(feature[] fv)
       // confidence = x_t^T ∑_{t-1} x_t
@@ -121,11 +105,8 @@ class Arow {
       }
       body
       {
+        //calculate confidence
         double confidence = 0.0;
-
-        /*
-         * confidenceの計算
-         */
         foreach(v; fv) {
           confidence += cov[v.index] * v.weight * v.weight;
         }
@@ -135,9 +116,11 @@ class Arow {
 
 
     /**
-     * 重みを更新する
-     *
-     * Returns: 損失 (0 or 1)
+     * Update weight vector
+     * Params:
+     *  fv    = feature
+     *  label = class label (+1, -1)
+     * Returns: loss (0 | 1)
      */
     int Update(feature[] fv, int label) 
       in
@@ -152,6 +135,7 @@ class Arow {
       body
       {
         double m = GetMargin(fv);
+
         if(m * label >= 1) return 0;
 
         double confidence = GetConfidence(fv);
@@ -159,30 +143,26 @@ class Arow {
         double alpha = (1.0 - label * m) * beta;
 
         //Update mean(μ)
-        //平均の更新
         foreach (v; fv) {
           mean[v.index] += alpha * cov[v.index] * label * v.weight;
         }
 
         //Update covariance(∑)
-        //分散の更新
         foreach (v; fv) {
           cov[v.index] = 1.0
             / ((1.0 / cov[v.index]) + v.weight * v.weight / hyperparameter);
         }
 
-        //損失の計算 (Squared Hinge-loss)
-        //
-        int loss = m * label < 0 ? 1 : 0;
-
-        return loss;
+        //Squared Hinge-loss
+        return m * label < 0 ? 1 : 0;
       }
     
 
     /**
-     * 認識結果を返す
-     *
-     * Returns: 認識結果(-1, +1)
+     * Predict
+     * Params:
+     *  fv =  feature
+     * Returns: class label (+1, -1)
      */
     int Predict(feature[] fv)
       in
@@ -199,9 +179,7 @@ class Arow {
         return m > 0 ? 1 : -1;
       }
 
-    /**
-     * 学習用データを1行受け取ってパースする
-     */
+
     feature[] ParseLine(string line, int label) {
       immutable string delim_value = ":";
       immutable string delim_cols = " ";
@@ -229,9 +207,7 @@ class Arow {
       return fv;
     }
 
-    /**
-     * トレーニングデータを読み込む
-     */
+
     example[] ReadData(string filename){
       Stream file = new BufferedFile(filename);
       size_t num_lines = 0;
@@ -242,10 +218,7 @@ class Arow {
 
         string line = cast(string)_line;
 
-        // 空行はスキップ
         if (line.length == 0) continue;
-
-        // コメント行はスキップ
         if (line[0] == '#') continue;
 
         assert(line[0] == '-' || line[0] == '+');
@@ -254,7 +227,6 @@ class Arow {
 
         feature[] vec = ParseLine(line, label);
 
-        // 読み込んだ特徴ベクトルを data に追加
         if(vec != null) {
           example ex = new example();
           ex.label = label;
@@ -279,10 +251,7 @@ void main(string[] args)
 {
   version(all)
   {
-
-    //const uint num_feature = 2;
-    const uint dimention = 1355192;
-    //uint num_example = 1355192;
+    immutable uint dimention = 1355192;
 
     Arow arow = new Arow(dimention);
     example[] data = arow.ReadData("news20.binary");
@@ -321,7 +290,7 @@ void main(string[] args)
         int label = arow.Predict(t.fv);
         if(label != t.label) mistake++;
       }
-      arow.CountZero();
+
       writefln("%dth iteration:", i);
       writefln("Number of mistake: %d", mistake);
       writefln("Error rate: %f", mistake * 1.0 / test_size);
